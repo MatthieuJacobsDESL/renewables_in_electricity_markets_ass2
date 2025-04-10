@@ -13,61 +13,54 @@ def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n
 
     # Input information
     n1,n2,n3 = n_scenarios
-    balance_price_down = 0.85 * spot_price_forecasts
-    balance_price_up = 1.15 * spot_price_forecasts
     T = np.shape(wind_forecasts)[0]  # number of time steps
+    balance_price_down = np.zeros((T,n1,n3))
+    balance_price_up = np.zeros((T,n1,n3))
+    f_down = 1.6; f_up = 0.5
+    for t in range(T):
+        for s1 in range(n1):
+            for s3 in range(n3):
+                if price_scheme == 'two_price': 
+                    if imbalance_forecasts[t,s3] > 0:  # System is long
+                        balance_price_up[t,s1,s3] = spot_price_forecasts[t,s1]
+                        balance_price_down[t,s1,s3] = f_down * spot_price_forecasts[t,s1]
+                    else:
+                        balance_price_up[t,s1,s3] = f_up * spot_price_forecasts[t,s1]
+                        balance_price_down[t,s1,s3] = spot_price_forecasts[t,s1]
+                else: 
+                    balance_price_up[t,s1,s3] = f_up * spot_price_forecasts[t,s1]
+                    balance_price_down[t,s1,s3] = f_down * spot_price_forecasts[t,s1]
 
     # Define the optimization variables
     wind_power_bid = cp.Variable(T) # wind power bid (in per unit of nominal capacity)
-    if price_scheme == 'two_price': # Define explicitly imbalance variables
-        imbalance_up = cp.Variable((T,n2)) # imbalance up
-        imbalance_down = cp.Variable((T,n2)) # imbalance down
-        imbalance = cp.Variable((T,n2)) # imbalance
+    imbalance_up = cp.Variable((T,n2)) # imbalance up
+    imbalance_down = cp.Variable((T,n2)) # imbalance down
+    imbalance = cp.Variable((T,n2)) # imbalance
 
     # Define the constraints
     constraints = []
     constraints += [wind_power_bid >= 0]  # wind power bid must be non-negative
-    constraints += [wind_power_bid <= 1]  # wind power bid must max
-    if price_scheme == 'two_price':
-        constraints += [imbalance_up >= 0]  # imbalance up must be non-negative
-        constraints += [imbalance_down >= 0]  # imbalance down must be non-negative
-        constraints += [imbalance == imbalance_up - imbalance_down]  # imbalance is the difference between imbalance up and down
-        for t in range(T):
-            for s2 in range(n2):
-                constraints += [imbalance[t,s2] == wind_forecasts[t,s2] - wind_power_bid]  # imbalance is the difference between wind power bid and wind forecast
-
+    constraints += [wind_power_bid <= 5]  # wind power bid must max
+    constraints += [imbalance_up >= 0]  # imbalance up must be non-negative
+    constraints += [imbalance_down >= 0]  # imbalance down must be non-negative
+    constraints += [imbalance == imbalance_up - imbalance_down]  # imbalance is the difference between imbalance up and down
+    for t in range(T):
+        for s2 in range(n2):
+            constraints += [imbalance[t,s2] == wind_forecasts[t,s2] - wind_power_bid[t]]  # imbalance is the difference between wind power bid and wind forecast
 
     # Define the objective function
     objective = 0  
     for s1 in range(n1):
         for s2 in range(n2):
             for s3 in range(n3):
-                if price_scheme == 'one_price':
-                    p1 = cp.sum(cp.multiply(wind_power_bid, spot_price_forecasts[:,s1]))
-                    p2=0
-                    for t in range(T):
-                        if imbalance_forecasts[t,s3] > 0:
-                            # System is long (too much production) --> pay people at imbalance down price
-                            p2 += (wind_power_bid[t]-wind_forecasts[t,s2]) * balance_price_down[t,s1]
-                        else:
-                            # System is short (too little production) --> pay people at imbalance price up
-                            p2 += (wind_power_bid[t] - wind_forecasts[t,s2]) * balance_price_up[t,s1]
-                    objective += 1/(n1*n2*n3) * (p1+p2)
-
-                else:
-                    p1 = cp.sum(cp.multiply(wind_power_bid, spot_price_forecasts[:,s1]))
-                    p2=0
-                    for t in range(T):
-                        if imbalance_forecasts[t,s3] > 0:
-                            # System is long (too much production) --> pay people at imbalance down price
-                            p2 += imbalance_up[t,s2] * balance_price_down[t,s1] # Settle imbalance at imbalance price
-                            p2 -= imbalance_down[t,s2] * spot_price_forecasts[t,s1] # pay spot price if counteracting imbalance
-                        else:
-                            # System is short (too little production) --> pay people at imbalance price up
-                            p2 += imbalance_up[t,s2] * spot_price_forecasts[t,s1] # pay spot price if counteracting imbalance
-                            p2 -= imbalance_down[t,s2] * balance_price_up[t,s1] # Settle imbalance at imbalance price
-
-                        objective += 1/(n1*n2*n3) * (p1+p2)
+                p1 = cp.sum(cp.multiply(wind_power_bid, spot_price_forecasts[:,s1]))
+                p2=0
+                for t in range(T):
+                    # System is long (too much production) --> pay people at imbalance down price
+                    p2 += imbalance_up[t,s2] * balance_price_up[t,s1,s3] # penalised for overproduction
+                    # System is short (too little production) --> pay people at imbalance price up
+                    p2 -= imbalance_down[t,s2] * balance_price_down[t,s1,s3] # penalised for underproduction
+                objective += 1/(n1*n2*n3) * (p1+p2)
 
 
     # Define the optimization problem
