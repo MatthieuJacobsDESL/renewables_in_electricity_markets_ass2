@@ -1,7 +1,7 @@
 import cvxpy as cp
 import numpy as np
 
-def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n_scenarios, price_scheme='one_price'):
+def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n_scenarios, f_up, f_down, price_scheme='one_price'):
 
     """
     wind_forecasts: numpy array of wind power forecasts
@@ -16,20 +16,6 @@ def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n
     T = np.shape(wind_forecasts)[0]  # number of time steps
     balance_price_down = np.zeros((T,n1,n3))
     balance_price_up = np.zeros((T,n1,n3))
-    f_down = 1.6; f_up = 0.5
-    for t in range(T):
-        for s1 in range(n1):
-            for s3 in range(n3):
-                if price_scheme == 'two_price': 
-                    if imbalance_forecasts[t,s3] > 0:  # System is long
-                        balance_price_up[t,s1,s3] = spot_price_forecasts[t,s1]
-                        balance_price_down[t,s1,s3] = f_down * spot_price_forecasts[t,s1]
-                    else:
-                        balance_price_up[t,s1,s3] = f_up * spot_price_forecasts[t,s1]
-                        balance_price_down[t,s1,s3] = spot_price_forecasts[t,s1]
-                else: 
-                    balance_price_up[t,s1,s3] = f_up * spot_price_forecasts[t,s1]
-                    balance_price_down[t,s1,s3] = f_down * spot_price_forecasts[t,s1]
 
     # Define the optimization variables
     wind_power_bid = cp.Variable(T) # wind power bid (in per unit of nominal capacity)
@@ -40,13 +26,16 @@ def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n
     # Define the constraints
     constraints = []
     constraints += [wind_power_bid >= 0]  # wind power bid must be non-negative
-    constraints += [wind_power_bid <= 5]  # wind power bid must max
+    constraints += [wind_power_bid <= 1]  # wind power bid must max
     constraints += [imbalance_up >= 0]  # imbalance up must be non-negative
+    constraints += [imbalance_up <= 1]  # imbalance up must max rated power
     constraints += [imbalance_down >= 0]  # imbalance down must be non-negative
-    constraints += [imbalance == imbalance_up - imbalance_down]  # imbalance is the difference between imbalance up and down
-    for t in range(T):
-        for s2 in range(n2):
-            constraints += [imbalance[t,s2] == wind_forecasts[t,s2] - wind_power_bid[t]]  # imbalance is the difference between wind power bid and wind forecast
+    constraints += [imbalance_down <= 1]  # imbalance down must max rated power
+    
+  
+    for s2 in range(n2):
+        constraints += [imbalance[:,s2] == wind_forecasts[:,s2] - wind_power_bid[:]]  # imbalance is the difference between wind power bid and wind forecast
+        constraints += [imbalance[:,s2] == imbalance_up[:,s2] - imbalance_down[:,s2]]  # imbalance is the difference between imbalance up and down
 
     # Define the objective function
     objective = 0  
@@ -54,18 +43,72 @@ def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n
         for s2 in range(n2):
             for s3 in range(n3):
                 p1 = cp.sum(cp.multiply(wind_power_bid, spot_price_forecasts[:,s1]))
-                p2=0
+                p2=cp.sum(0)
                 for t in range(T):
-                    # System is long (too much production) --> pay people at imbalance down price
-                    p2 += imbalance_up[t,s2] * balance_price_up[t,s1,s3] # penalised for overproduction
-                    # System is short (too little production) --> pay people at imbalance price up
-                    p2 -= imbalance_down[t,s2] * balance_price_down[t,s1,s3] # penalised for underproduction
+                    
+                    if price_scheme == 'one_price':
+                        # According to example slides --> fixed price for wind pp independent of system state
+                        """
+                        p2 += imbalance_up[t,s2] * f_down * spot_price_forecasts[t,s1] # paid for overproduction at regulation down price
+                        p2 -= imbalance_down[t,s2] * f_up * spot_price_forecasts[t,s1] # pay back for underproduction at regulation up price
+                        """
+                        # In this case --> incentivised to bid what you expect to produce
+                        # What I would expect intuitively:
+                        if imbalance_forecasts[t,s3] >= 0: # System is long
+                            p2 += imbalance_up[t,s2] * f_down * spot_price_forecasts[t,s1] # paid for overproduction at regulation down price --> less than could have earned in DA
+                            p2 -= imbalance_down[t,s2] * f_down * spot_price_forecasts[t,s1] # pay back for underproduction at regulation up price (making profit with DA as imbalance is desired)
+                        else: # System is short
+                            p2 += imbalance_up[t,s2] * f_up * spot_price_forecasts[t,s1] # paid for overproduction at regulation down price (making profit with DA as imbalance is desired)
+                            p2 -= imbalance_down[t,s2] * f_up * spot_price_forecasts[t,s1] # pay back for underproduction at regulation up price, paying more than in DA
+
+                    elif price_scheme == 'two_price':
+                        if imbalance_forecasts[t,s3] >= 0: # System is long
+                            p2 += imbalance_up[t,s2] * f_down * spot_price_forecasts[t,s1] # paid for overproduction at regulation down price --> less than could have earned in DA
+                            p2 -= imbalance_down[t,s2] * spot_price_forecasts[t,s1] # pay back for underproduction at DA price --> removing incentive to be wrong
+                        else: # System is short
+                            p2 += imbalance_up[t,s2] * spot_price_forecasts[t,s1] # paid for overproduction at DA price --> removing incentive to be wrong
+                            p2 -= imbalance_down[t,s2] * f_up * spot_price_forecasts[t,s1] # pay back for underproduction at regulation up price, paying more than in DA
                 objective += 1/(n1*n2*n3) * (p1+p2)
 
-
+    obj = cp.Maximize(objective)
     # Define the optimization problem
-    problem = cp.Problem(cp.Maximize(objective), constraints)
+    problem = cp.Problem(obj, constraints)
     # Solve the problem
     problem.solve()
-                
-    return wind_power_bid.value, problem
+    
+    # Print the objective value
+    print("Objective value: ", problem.value)
+    return wind_power_bid.value, problem,  imbalance.value, imbalance_up.value, imbalance_down.value
+
+
+def compute_profit(wind_power_bid, wind_realization, spot_price, imbalance, f_down, f_up, price_scheme='one_price'):
+    """
+    wind_power_bid: numpy array of wind power bids
+    wind_realization: numpy array of wind power realizations
+    spot_price: numpy array of spot prices
+    imbalance: numpy array of imbalances
+    price_scheme: 'one_price' or 'two_price'
+    """
+    
+    T = np.shape(wind_power_bid)[0]  # number of time steps
+    profit = 0
+
+    for t in range(T):
+        p1 = wind_power_bid[t] * spot_price[t]
+        p2 = 0
+        if price_scheme == 'one_price':
+            if imbalance[t] >= 0: # System is long
+                p2 += (wind_realization[t]-wind_power_bid[t]) * f_down * spot_price[t] # paid for overproduction at regulation down price --> less than could have earned in DA
+            else: # System is short
+                p2 += (wind_realization[t]-wind_power_bid[t]) * f_up * spot_price[t] # paid for overproduction at regulation up price --> more than could have earned in DA
+
+        elif price_scheme == 'two_price':
+            if imbalance[t] >= 0: # System is long
+                p2 += max((wind_realization[t]-wind_power_bid[t]),0) * f_down * spot_price[t] # paid for overproduction at regulation down price --> less than could have earned in DA
+                p2 += min((wind_realization[t]-wind_power_bid[t]),0) * spot_price[t] # pay back for underproduction at DA price --> removing incentive to be wrong
+            else: # System is short
+                p2 += max((wind_realization[t]-wind_power_bid[t]),0) * spot_price[t] # paid for overproduction at DA price --> removing incentive to be wrong
+                p2 += min((wind_realization[t]-wind_power_bid[t]),0) * f_up * spot_price[t] # pay back for underproduction at regulation up price, paying more than in DA
+        profit += (p1 + p2)
+
+    return profit
