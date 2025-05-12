@@ -8,7 +8,7 @@ def generate_profile(num_minutes=60, lower_bound=220, upper_bound=600, max_step=
       - Consumption at each minute is within [lower_bound, upper_bound]
       - Change between consecutive minutes does not exceed max_step (kW)
     """
-    np.random.seed(seed)
+    np.random.seed(None)
 
     profile = np.zeros(num_minutes)
     # Initialize the first minute consumption uniformly within [220, 600]
