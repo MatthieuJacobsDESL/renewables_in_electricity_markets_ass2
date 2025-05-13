@@ -1,7 +1,7 @@
 import cvxpy as cp
 import numpy as np
 
-def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n_scenarios, f_up, f_down, price_scheme='one_price'):
+def wind_pp_bidding_deprecated(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n_scenarios, f_up, f_down, price_scheme='one_price'):
 
     """
     wind_forecasts: numpy array of wind power forecasts
@@ -78,7 +78,7 @@ def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, n
     print("Objective value: ", problem.value)
     return wind_power_bid.value, problem,  imbalance.value, imbalance_up.value, imbalance_down.value
 
-def wind_pp_bidding_2(wind_forecasts, spot_price_forecasts, imbalance_forecasts, f_up, f_down, price_scheme='one_price'):
+def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, f_up, f_down, price_scheme='one_price'):
 
     """
     wind_forecasts: numpy array of wind power forecasts
@@ -152,6 +152,85 @@ def wind_pp_bidding_2(wind_forecasts, spot_price_forecasts, imbalance_forecasts,
     # Print the objective value
     print("Objective value: ", problem.value)
     return wind_power_bid.value, problem,  imbalance.value, imbalance_up.value, imbalance_down.value
+
+def wind_pp_bidding_ra(wind_forecasts, spot_price_forecasts, imbalance_forecasts, f_up, f_down, alpha=0.95, beta=0, price_scheme='one_price'):
+    """
+    wind_forecasts: numpy array of wind power forecasts
+    spot_price_forecasts: numpy array of spot price forecasts
+    imbalance_forecasts: numpy array of imbalance forecasts
+    n_scenarios: number of scenarios for the optimization (list with number of wf scenarios, number of spot prices scenarios and number of imbalance scenarios)
+    price_scheme: 'one_price' or 'two_price'
+    """
+
+    # Input information
+    Nsc = np.shape(wind_forecasts)[1]  # number of scenarios
+    T = np.shape(wind_forecasts)[0]  # number of time steps
+
+    # Define the optimization variables
+    wind_power_bid = cp.Variable(T) # wind power bid (in per unit of nominal capacity)
+    imbalance_up = cp.Variable((T,Nsc)) # imbalance up
+    imbalance_down = cp.Variable((T,Nsc)) # imbalance down
+    imbalance = cp.Variable((T,Nsc)) # imbalance
+    zeta = cp.Variable()
+    eta  = cp.Variable(Nsc)
+
+    # Define the constraints
+    constraints = []
+    constraints += [wind_power_bid >= 0]  # wind power bid must be non-negative
+    constraints += [wind_power_bid <= 1]  # wind power bid must max
+    constraints += [imbalance_up >= 0]  # imbalance up must be non-negative
+    constraints += [imbalance_up <= 1]  # imbalance up must max rated power
+    constraints += [imbalance_down >= 0]  # imbalance down must be non-negative
+    constraints += [imbalance_down <= 1]  # imbalance down must max rated power
+    
+  
+    for s in range(Nsc):
+        constraints += [imbalance[:,s] == wind_forecasts[:,s] - wind_power_bid[:]]  # imbalance is the difference between wind power bid and wind forecast
+        constraints += [imbalance[:,s] == imbalance_up[:,s] - imbalance_down[:,s]]  # imbalance is the difference between imbalance up and down
+
+    # Define the objective function
+    objective = 0  
+    for s in range(Nsc):
+        p1 = cp.sum(cp.multiply(wind_power_bid, spot_price_forecasts[:,s]))
+        p2 = cp.sum(0)
+        for t in range(T):
+            if price_scheme == 'one_price':
+                # According to example slides --> fixed price for wind pp independent of system state
+                """p2 += imbalance_up[t,s2] * f_down * spot_price_forecasts[t,s1] # paid for overproduction at regulation down price
+                p2 -= imbalance_down[t,s2] * f_up * spot_price_forecasts[t,s1] # pay back for underproduction at regulation up price"""
+                
+                # In this case --> incentivised to bid what you expect to produce
+                # What I would expect intuitively:
+                if imbalance_forecasts[t,s] >= 0: # System is long
+                    p2 += imbalance_up[t,s] * f_down * spot_price_forecasts[t,s] # paid for overproduction at regulation down price --> less than could have earned in DA
+                    p2 -= imbalance_down[t,s] * f_down * spot_price_forecasts[t,s] # pay back for underproduction at regulation up price (making profit with DA as imbalance is desired)
+                else: # System is short
+                    p2 += imbalance_up[t,s] * f_up * spot_price_forecasts[t,s] # paid for overproduction at regulation down price (making profit with DA as imbalance is desired)
+                    p2 -= imbalance_down[t,s] * f_up * spot_price_forecasts[t,s] # pay back for underproduction at regulation up price, paying more than in DA
+
+            elif price_scheme == 'two_price':
+                if imbalance_forecasts[t,s] >= 0: # System is long
+                    p2 += imbalance_up[t,s] * f_down * spot_price_forecasts[t,s] # paid for overproduction at regulation down price --> less than could have earned in DA
+                    p2 -= imbalance_down[t,s] * spot_price_forecasts[t,s] # pay back for underproduction at DA price --> removing incentive to be wrong
+                else: # System is short
+                    p2 += imbalance_up[t,s] * spot_price_forecasts[t,s] # paid for overproduction at DA price --> removing incentive to be wrong
+                    p2 -= imbalance_down[t,s] * f_up * spot_price_forecasts[t,s] # pay back for underproduction at regulation up price, paying more than in DA
+        
+        constraints += [eta[s] >= 0]
+        constraints += [eta[s] >= zeta - (p1 + p2)]
+        objective += 1/(Nsc) * (p1+p2)
+
+    expected_profit = objective
+    objective = (1-beta)*expected_profit + beta*(zeta - cp.sum(eta)/Nsc/(1-alpha))
+    obj = cp.Maximize(objective)
+    # Define the optimization problem
+    problem = cp.Problem(obj, constraints)
+    # Solve the problem
+    problem.solve()
+    cvar = zeta.value - np.sum(eta.value)/Nsc/(1-alpha)
+    # Print the objective value
+    print("Objective value: ", problem.value)
+    return wind_power_bid.value, problem, imbalance.value, imbalance_up.value, imbalance_down.value, expected_profit.value, cvar
 
 def compute_profit(wind_power_bid, wind_realization, spot_price, imbalance, f_down, f_up, price_scheme='one_price'):
     """
