@@ -62,7 +62,7 @@ def also_x(profiles, eps=0.1, tol=10e-5, M=1e4, verbose=False):
     # Todo: not sure if this is correct
     q_overbar=tol*num_profiles**2
     # Alternative
-    q_overbar=tol*num_profiles*num_minutes
+    #q_overbar=tol*num_profiles*num_minutes
     it_counter=0
     while (q_overbar-q_underbar)>=tol:
         q = (q_underbar+q_overbar)/2
@@ -70,7 +70,7 @@ def also_x(profiles, eps=0.1, tol=10e-5, M=1e4, verbose=False):
         y = cp.Variable((num_minutes,num_profiles))
         constraints=[]
         constraints+=[
-            0<=y, y<=1
+            y>=0, y<=1
         ]
         for i in range(num_minutes):
             for j in range(num_profiles):
