@@ -31,7 +31,7 @@ def cvar(profiles, eps=0.1, verbose=False):
     # Problem variables
     offer_capacity = cp.Variable(nonneg=True)
     beta = cp.Variable()
-    zeta = cp.Variable((num_minutes, num_profiles),boolean=True)
+    zeta = cp.Variable((num_minutes, num_profiles))
 
     # Problem constraints
     constraints=[]
@@ -45,7 +45,7 @@ def cvar(profiles, eps=0.1, verbose=False):
                 beta<=zeta[i,j]
             ]
     constraints+=[
-        (1/num_profiles*num_minutes)*cp.sum(zeta) <= (1-eps)*beta
+        (1/(num_profiles*num_minutes))*cp.sum(zeta) <= (1-eps)*beta
     ]
 
     # Solve problem
@@ -67,7 +67,7 @@ def also_x(profiles, eps=0.1, tol=10e-5, M=1e4, verbose=False):
     while (q_overbar-q_underbar)>=tol:
         q = (q_underbar+q_overbar)/2
         offer_capacity=cp.Variable(nonneg=True)
-        y = cp.Variable((num_minutes,num_profiles), boolean=True)
+        y = cp.Variable((num_minutes,num_profiles))
         constraints=[]
         constraints+=[
             0<=y, y<=1
@@ -84,7 +84,7 @@ def also_x(profiles, eps=0.1, tol=10e-5, M=1e4, verbose=False):
         problem.solve(verbose=verbose)
         
         prob = (1/num_profiles*num_minutes)*np.sum(y.value)
-        if(prob>=1-eps):
+        if(1-prob>=1-eps):
             q_underbar=q
         else:
             q_overbar=q
