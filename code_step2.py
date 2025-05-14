@@ -56,11 +56,12 @@ def cvar(profiles, eps=0.1, verbose=False):
     return offer_capacity.value, problem
 
 def also_x(profiles, eps=0.1, tol=10e-5, M=1e4, verbose=False):
+    
     num_profiles, num_minutes = profiles.shape
     q_underbar=0
 
     # Todo: not sure if this is correct
-    q_overbar=tol*num_profiles**2
+    q_overbar = eps*num_profiles**2
     # Alternative
     #q_overbar=tol*num_profiles*num_minutes
     it_counter=0
@@ -84,13 +85,14 @@ def also_x(profiles, eps=0.1, tol=10e-5, M=1e4, verbose=False):
         problem.solve(verbose=verbose)
         
         prob = (1/num_profiles*num_minutes)*np.sum(y.value)
+        
         if(1-prob>=1-eps):
             q_underbar=q
         else:
             q_overbar=q
 
-        print(f'Iteration: {it_counter}')
-        print(prob, q_overbar,q_underbar, q_overbar-q_underbar)
+        """print(f'Iteration: {it_counter}')
+        print(prob, q_overbar,q_underbar, q_overbar-q_underbar)"""
         it_counter+=1
 
     return offer_capacity.value, problem
