@@ -1,0 +1,6 @@
+Three notebooks are provided
+inputdata.ipynb preprocesses the wind data, the spot prices and generates the required scenarios
+part1 contains the code to obtain the results for the first part of the assignment
+part 2 containts the code to obtain the results for the second part of the assignment
+wind_power_bidding containts the functions gandling the wind power plant bidding
+stochastic_load contains all the functions used in the part 2 notebook related to the P90 requirement for reserve provision with stochastic loads
