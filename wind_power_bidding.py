@@ -147,7 +147,7 @@ def wind_pp_bidding(wind_forecasts, spot_price_forecasts, imbalance_forecasts, f
     # Define the optimization problem
     problem = cp.Problem(obj, constraints)
     # Solve the problem
-    problem.solve()
+    problem.solve(verbose=False)
     
     # Print the objective value
     print("Objective value: ", problem.value)
@@ -226,7 +226,7 @@ def wind_pp_bidding_ra(wind_forecasts, spot_price_forecasts, imbalance_forecasts
     # Define the optimization problem
     problem = cp.Problem(obj, constraints)
     # Solve the problem
-    problem.solve()
+    problem.solve(verbose=False)
     cvar = zeta.value - np.sum(eta.value)/Nsc/(1-alpha)
     # Print the objective value
     print("Objective value: ", problem.value)
